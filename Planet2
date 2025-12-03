@@ -1,0 +1,292 @@
+import React, { useState, useEffect } from 'react';
+import { AppMode, PlanetState } from './types';
+import { Timer } from './components/Timer';
+import { Button } from './components/Button';
+import { generateInitialPlanet, evolvePlanet, generateStudyMotivation } from './services/geminiService';
+
+const App = () => {
+  const [mode, setMode] = useState<AppMode>(AppMode.ONBOARDING);
+  const [points, setPoints] = useState(0);
+  const [totalFocusTime, setTotalFocusTime] = useState(0);
+  const [planet, setPlanet] = useState<PlanetState | null>(null);
+  const [notification, setNotification] = useState<string | null>(null);
+  const [evolutionInput, setEvolutionInput] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Suggested evolutions based on cost
+  const evolutions = [
+    { cost: 25, prompt: "Add a small cozy wooden cabin", label: "Build Cabin (25pts)" },
+    { cost: 50, prompt: "Add a beautiful magical tree with glowing fruit", label: "Plant Magic Tree (50pts)" },
+    { cost: 75, prompt: "Add a flowing river with a waterfall", label: "Create River (75pts)" },
+    { cost: 100, prompt: "Add a futuristic study dome with glass walls", label: "Study Dome (100pts)" },
+    { cost: 150, prompt: "Change the sky to a galaxy nebula background", label: "Galaxy Sky (150pts)" },
+  ];
+
+  const handleStartJourney = async () => {
+    setIsProcessing(true);
+    try {
+      const initialImage = await generateInitialPlanet();
+      setPlanet({
+        imageData: initialImage,
+        mimeType: 'image/png',
+        evolutionStage: 1,
+        description: "A fresh new world waiting for your knowledge."
+      });
+      setMode(AppMode.TIMER);
+    } catch (error) {
+      console.error("Failed to create world", error);
+      alert("Could not initialize planet. Please try again.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleSessionComplete = async (minutes: number) => {
+    // 1 minute = 1 point
+    const earnedPoints = minutes;
+    setPoints(prev => prev + earnedPoints);
+    setTotalFocusTime(prev => prev + minutes);
+    
+    // Generate motivation
+    const message = await generateStudyMotivation(minutes);
+    setNotification(message);
+    
+    // Auto-dismiss notification
+    setTimeout(() => setNotification(null), 5000);
+    
+    setMode(AppMode.PLANET);
+  };
+
+  const handleEvolve = async (customPrompt?: string, cost?: number) => {
+    if (!planet) return;
+    
+    const promptToUse = customPrompt || evolutionInput;
+    const costToUse = cost || 0;
+
+    if (points < costToUse) {
+      alert("Not enough focus points!");
+      return;
+    }
+
+    if (!promptToUse.trim()) return;
+
+    setIsProcessing(true);
+    setMode(AppMode.EVOLVING);
+
+    try {
+      // Extract base64 from data URL
+      const base64Data = planet.imageData.split(',')[1];
+      
+      const newImage = await evolvePlanet(base64Data, 'image/png', promptToUse);
+      
+      setPlanet(prev => prev ? {
+        ...prev,
+        imageData: newImage,
+        evolutionStage: prev.evolutionStage + 1
+      } : null);
+      
+      setPoints(prev => prev - costToUse);
+      setEvolutionInput("");
+      setMode(AppMode.PLANET);
+    } catch (error) {
+      console.error(error);
+      alert("Evolution failed. Please try again.");
+      setMode(AppMode.PLANET);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans selection:bg-indigo-500/30">
+      
+      {/* Header */}
+      <header className="w-full py-4 px-6 border-b border-slate-800 bg-slate-900/50 backdrop-blur-md sticky top-0 z-50 flex justify-between items-center">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center shadow-lg shadow-indigo-500/50">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-white" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clipRule="evenodd" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-400 to-cyan-300">
+            FocusPlanet
+          </h1>
+        </div>
+        
+        {mode !== AppMode.ONBOARDING && (
+          <div className="flex items-center gap-4 bg-slate-800 rounded-full px-4 py-1.5 border border-slate-700">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 uppercase font-bold tracking-wider">FP</span>
+              <span className="text-lg font-mono font-bold text-yellow-400">{points}</span>
+            </div>
+            <div className="w-px h-4 bg-slate-700"></div>
+             <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-400 uppercase font-bold tracking-wider">Lvl</span>
+              <span className="text-lg font-mono font-bold text-indigo-400">{planet?.evolutionStage || 1}</span>
+            </div>
+          </div>
+        )}
+      </header>
+
+      {/* Main Content */}
+      <main className="flex-grow flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        
+        {/* Background Ambient Light */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-indigo-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+        <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-teal-600/10 rounded-full blur-[100px] pointer-events-none"></div>
+
+        {/* ONBOARDING */}
+        {mode === AppMode.ONBOARDING && (
+          <div className="max-w-md text-center space-y-8 animate-fade-in-up z-10">
+            <div className="space-y-4">
+              <h2 className="text-4xl md:text-5xl font-extrabold text-white leading-tight">
+                Turn Your Study Time Into <span className="text-indigo-400">A World</span>
+              </h2>
+              <p className="text-slate-400 text-lg leading-relaxed">
+                Stay consistent. Earn points. Build your own personal planet.
+                <br/>
+                Every 25 minutes of focus creates something beautiful.
+              </p>
+            </div>
+            <Button 
+              onClick={handleStartJourney} 
+              isLoading={isProcessing} 
+              className="w-full text-lg py-4 shadow-indigo-500/20"
+            >
+              Initialize Planet
+            </Button>
+          </div>
+        )}
+
+        {/* TIMER MODE */}
+        {mode === AppMode.TIMER && (
+          <div className="w-full max-w-lg z-10 animate-fade-in">
+             <div className="mb-8 text-center">
+                <p className="text-slate-400 mb-2">Current Objective</p>
+                <h3 className="text-2xl font-bold text-white">Focus & Gather Energy</h3>
+             </div>
+             
+             <div className="bg-slate-800/50 backdrop-blur-xl border border-slate-700/50 rounded-3xl p-8 shadow-2xl">
+                <Timer onComplete={handleSessionComplete} />
+             </div>
+
+             <div className="mt-8 text-center">
+               <button 
+                 onClick={() => setMode(AppMode.PLANET)}
+                 className="text-slate-500 hover:text-indigo-400 text-sm font-medium transition-colors flex items-center justify-center gap-2 mx-auto"
+               >
+                 View Planet <span className="text-xs bg-slate-800 px-2 py-0.5 rounded text-slate-400">Esc</span>
+               </button>
+             </div>
+          </div>
+        )}
+
+        {/* PLANET / EVOLVING MODE */}
+        {(mode === AppMode.PLANET || mode === AppMode.EVOLVING) && planet && (
+          <div className="w-full max-w-5xl flex flex-col md:flex-row gap-8 items-center z-10 animate-fade-in">
+            
+            {/* Planet View */}
+            <div className="flex-1 w-full flex flex-col items-center">
+              <div className="relative w-full max-w-md aspect-square">
+                 {/* Planet Image Container */}
+                 <div className={`relative w-full h-full rounded-full transition-all duration-700 ${mode === AppMode.EVOLVING ? 'scale-95 opacity-80 blur-sm' : 'animate-float'}`}>
+                    {/* Glow effect */}
+                    <div className="absolute inset-4 rounded-full bg-indigo-500/20 blur-xl"></div>
+                    <img 
+                      src={planet.imageData} 
+                      alt="My Planet" 
+                      className="w-full h-full object-contain relative z-10 drop-shadow-2xl" 
+                    />
+                 </div>
+
+                 {/* Processing Overlay */}
+                 {mode === AppMode.EVOLVING && (
+                   <div className="absolute inset-0 flex flex-col items-center justify-center z-20">
+                      <div className="w-16 h-16 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
+                      <span className="text-indigo-300 font-bold tracking-wider bg-slate-900/80 px-4 py-2 rounded-full backdrop-blur">TERRAFORMING...</span>
+                   </div>
+                 )}
+              </div>
+            </div>
+
+            {/* Controls */}
+            <div className="w-full md:w-96 space-y-6">
+               <div className="bg-slate-800/80 backdrop-blur-md border border-slate-700 rounded-2xl p-6 shadow-xl">
+                 <div className="flex justify-between items-center mb-4">
+                   <h3 className="text-xl font-bold text-white">Evolution Menu</h3>
+                   <button onClick={() => setMode(AppMode.TIMER)} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1 rounded-full transition-colors">
+                     Back to Timer
+                   </button>
+                 </div>
+                 
+                 <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {evolutions.map((evo, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleEvolve(evo.prompt, evo.cost)}
+                        disabled={points < evo.cost || isProcessing}
+                        className={`w-full flex justify-between items-center p-3 rounded-xl border transition-all text-left group
+                          ${points >= evo.cost 
+                            ? 'border-slate-600 bg-slate-700/50 hover:bg-indigo-900/30 hover:border-indigo-500/50' 
+                            : 'border-slate-800 bg-slate-800/50 opacity-50 cursor-not-allowed'
+                          }`}
+                      >
+                        <span className="text-sm font-medium text-slate-200 group-hover:text-white">{evo.label}</span>
+                        {points >= evo.cost ? (
+                           <div className="w-6 h-6 rounded-full bg-indigo-500/20 flex items-center justify-center text-indigo-400">
+                             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                             </svg>
+                           </div>
+                        ) : (
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-500" viewBox="0 0 20 20" fill="currentColor">
+                              <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                           </svg>
+                        )}
+                      </button>
+                    ))}
+
+                    <div className="pt-4 border-t border-slate-700">
+                       <label className="text-xs text-slate-400 uppercase font-bold mb-2 block">Custom Evolution (Cost: 50)</label>
+                       <div className="flex gap-2">
+                         <input 
+                           type="text" 
+                           value={evolutionInput}
+                           onChange={(e) => setEvolutionInput(e.target.value)}
+                           placeholder="E.g., Add a futuristic tower..."
+                           className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                         />
+                         <button 
+                           onClick={() => handleEvolve(evolutionInput, 50)}
+                           disabled={points < 50 || !evolutionInput.trim() || isProcessing}
+                           className="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-lg px-3 py-2"
+                         >
+                           <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                             <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                           </svg>
+                         </button>
+                       </div>
+                    </div>
+                 </div>
+               </div>
+            </div>
+
+          </div>
+        )}
+
+        {/* Notification Toast */}
+        {notification && (
+          <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white px-6 py-3 rounded-full shadow-2xl z-50 animate-bounce flex items-center gap-3">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-yellow-300" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clipRule="evenodd" />
+            </svg>
+            <span className="font-semibold">{notification}</span>
+          </div>
+        )}
+
+      </main>
+    </div>
+  );
+};
+
+export default App;
